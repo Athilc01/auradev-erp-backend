@@ -9,6 +9,7 @@ public record CustomerResponse(
         UUID id,
         String name,
         String phone,
+        String address,
         CustomerType type,
         int loyaltyPoints,
         BigDecimal creditBalance

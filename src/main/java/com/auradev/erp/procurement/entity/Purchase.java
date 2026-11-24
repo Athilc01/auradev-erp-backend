@@ -50,4 +50,8 @@ public class Purchase extends BaseEntity {
 
     @OneToMany(mappedBy = "purchase", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<PurchaseItem> items = new ArrayList<>();
+
+    @OneToMany(mappedBy = "purchase", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("createdAt ASC")
+    private List<PurchasePayment> payments = new ArrayList<>();
 }

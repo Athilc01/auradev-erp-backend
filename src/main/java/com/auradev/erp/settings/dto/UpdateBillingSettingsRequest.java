@@ -13,5 +13,7 @@ public record UpdateBillingSettingsRequest(
         Boolean showCashierOnReceipt,
         Boolean showGstBreakupOnReceipt,
         Boolean showCustomerOnReceipt,
-        Boolean roundTotalToRupee
+        Boolean roundTotalToRupee,
+        Boolean markOverdueShiftsAtClose,
+        String shiftClosingTime
 ) {}

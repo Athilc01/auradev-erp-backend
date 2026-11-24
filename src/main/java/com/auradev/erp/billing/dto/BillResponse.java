@@ -15,6 +15,7 @@ public record BillResponse(
         String billNo,
         UUID customerId,
         String customerName,
+        String customerAddress,
         String cashierName,
         BillStatus status,
         DiscountMode discountMode,
@@ -30,6 +31,7 @@ public record BillResponse(
         BigDecimal changeDue,
         Instant createdAt,
         Instant updatedAt,
+        List<BillPaymentResponse> payments,
         List<GstSlabSummary> gstSlabs,
         List<BillLineResponse> lines
 ) {}

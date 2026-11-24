@@ -423,6 +423,95 @@ public class DashboardQueryRepository {
                 tenantId, limit);
     }
 
+    public CashSummary todayCashSummary(UUID tenantId) {
+        LocalDate today = LocalDate.now(STORE_ZONE);
+        Instant from = today.atStartOfDay(STORE_ZONE).toInstant();
+        Instant to = today.plusDays(1).atStartOfDay(STORE_ZONE).toInstant();
+        return jdbc.queryForObject("""
+                SELECT
+                  COALESCE(SUM(CASE WHEN p.method = 'CASH' THEN p.amount ELSE 0 END), 0) AS cash,
+                  COALESCE(SUM(CASE WHEN p.method = 'UPI' THEN p.amount ELSE 0 END), 0) AS upi,
+                  COALESCE(SUM(CASE WHEN p.method = 'CARD' THEN p.amount ELSE 0 END), 0) AS card
+                FROM payments p
+                JOIN bills b ON b.id = p.bill_id
+                WHERE b.tenant_id = ? AND b.status = 'COMPLETED'
+                  AND b.created_at >= ? AND b.created_at < ?
+                """, (rs, rowNum) -> {
+            BigDecimal cash = rs.getBigDecimal("cash");
+            BigDecimal upi = rs.getBigDecimal("upi");
+            BigDecimal card = rs.getBigDecimal("card");
+            return new CashSummary(cash, upi, card, cash.add(upi).add(card));
+        }, tenantId, Timestamp.from(from), Timestamp.from(to));
+    }
+
+    public DailyBusinessReportResponse dailyBusinessReport(UUID tenantId, LocalDate date) {
+        Instant from = date.atStartOfDay(ZoneId.of("Asia/Qatar")).toInstant();
+        Instant to = date.plusDays(1).atStartOfDay(ZoneId.of("Asia/Qatar")).toInstant();
+        Object[] sales = jdbc.queryForObject("""
+                SELECT COALESCE(SUM(b.grand_total), 0), COUNT(*),
+                       COALESCE((SELECT SUM(bi.quantity) FROM bill_items bi JOIN bills bx ON bx.id = bi.bill_id
+                                 WHERE bx.tenant_id = ? AND bx.status = 'COMPLETED' AND bx.created_at >= ? AND bx.created_at < ?), 0)
+                FROM bills b
+                WHERE b.tenant_id = ? AND b.status = 'COMPLETED' AND b.created_at >= ? AND b.created_at < ?
+                """, (rs, rowNum) -> new Object[] { rs.getBigDecimal(1), rs.getLong(2), rs.getBigDecimal(3) },
+                tenantId, Timestamp.from(from), Timestamp.from(to), tenantId, Timestamp.from(from), Timestamp.from(to));
+        Object[] payments = jdbc.queryForObject("""
+                SELECT COALESCE(SUM(CASE WHEN p.method = 'CASH' THEN p.amount ELSE 0 END), 0),
+                       COALESCE(SUM(CASE WHEN p.method = 'UPI' THEN p.amount ELSE 0 END), 0),
+                       COALESCE(SUM(CASE WHEN p.method = 'CARD' THEN p.amount ELSE 0 END), 0),
+                       COALESCE(SUM(CASE WHEN p.method = 'CREDIT' THEN p.amount ELSE 0 END), 0)
+                FROM payments p JOIN bills b ON b.id = p.bill_id
+                WHERE b.tenant_id = ? AND b.status = 'COMPLETED' AND b.created_at >= ? AND b.created_at < ?
+                """, (rs, rowNum) -> new Object[] { rs.getBigDecimal(1), rs.getBigDecimal(2), rs.getBigDecimal(3), rs.getBigDecimal(4) },
+                tenantId, Timestamp.from(from), Timestamp.from(to));
+        Object[] returns = jdbc.queryForObject("SELECT COUNT(*), COALESCE(SUM(refund_total), 0) FROM sales_returns WHERE tenant_id = ? AND created_at >= ? AND created_at < ?",
+                (rs, rowNum) -> new Object[] { rs.getLong(1), rs.getBigDecimal(2) }, tenantId, Timestamp.from(from), Timestamp.from(to));
+        BigDecimal purchaseValue = jdbc.queryForObject("SELECT COALESCE(SUM(grand_total), 0) FROM purchases WHERE tenant_id = ? AND bill_date = ? AND status <> 'CANCELLED'", BigDecimal.class, tenantId, date);
+        BigDecimal purchasePayments = jdbc.queryForObject("SELECT COALESCE(SUM(pp.amount), 0) FROM purchase_payments pp WHERE pp.tenant_id = ? AND pp.created_at >= ? AND pp.created_at < ?", BigDecimal.class, tenantId, Timestamp.from(from), Timestamp.from(to));
+        Integer expiring = jdbc.queryForObject("SELECT COUNT(*)::int FROM inventory_batches WHERE tenant_id = ? AND quantity_on_hand > 0 AND expiry_date IS NOT NULL AND expiry_date <= ? + INTERVAL '30 days'", Integer.class, tenantId, date);
+        Object[] shifts = jdbc.queryForObject("SELECT COUNT(*), COALESCE(SUM(variance), 0) FROM cashier_shifts WHERE tenant_id = ? AND status = 'CLOSED' AND closed_at >= ? AND closed_at < ?", (rs, rowNum) -> new Object[] { rs.getLong(1), rs.getBigDecimal(2) }, tenantId, Timestamp.from(from), Timestamp.from(to));
+        return new DailyBusinessReportResponse(date, (BigDecimal) sales[0], (Long) sales[1], (BigDecimal) sales[2],
+                (BigDecimal) payments[0], (BigDecimal) payments[1], (BigDecimal) payments[2], (BigDecimal) payments[3],
+                (Long) returns[0], (BigDecimal) returns[1], purchaseValue, purchasePayments, countLowStock(tenantId), expiring == null ? 0 : expiring,
+                (Long) shifts[0], (BigDecimal) shifts[1]);
+    }
+
+    public CreditSummary creditSummary(UUID tenantId) {
+        CreditSummary totals = jdbc.queryForObject("""
+                SELECT COUNT(*) AS customers, COALESCE(SUM(credit_balance), 0) AS outstanding
+                FROM customers
+                WHERE tenant_id = ? AND credit_balance > 0
+                """, (rs, rowNum) -> new CreditSummary(rs.getLong("customers"), rs.getBigDecimal("outstanding"), List.of()), tenantId);
+        List<CreditCustomer> customers = jdbc.query("""
+                SELECT id, name, phone, credit_balance
+                FROM customers
+                WHERE tenant_id = ? AND credit_balance > 0
+                ORDER BY credit_balance DESC, name ASC
+                """, (rs, rowNum) -> new CreditCustomer(
+                (UUID) rs.getObject("id"), rs.getString("name"), rs.getString("phone"), rs.getBigDecimal("credit_balance")), tenantId);
+        return new CreditSummary(totals.customers(), totals.outstanding(), customers);
+    }
+
+    public List<DashboardAction> operationalActions(UUID tenantId) {
+        List<DashboardAction> actions = new ArrayList<>();
+        int low = countLowStock(tenantId);
+        if (low > 0) actions.add(new DashboardAction("low_stock", "Reorder stock", low + " item" + (low == 1 ? " is" : "s are") + " at or below reorder level", "warning", "inventory"));
+
+        Integer pendingGrn = jdbc.queryForObject("SELECT COUNT(*)::int FROM purchases WHERE tenant_id = ? AND status = 'PENDING_GRN'", Integer.class, tenantId);
+        if (pendingGrn != null && pendingGrn > 0) actions.add(new DashboardAction("pending_grn", "Receive purchase orders", pendingGrn + " GRN" + (pendingGrn == 1 ? " is" : "s are") + " waiting to be received", "info", "purchases"));
+
+        Integer expiring = jdbc.queryForObject("""
+                SELECT COUNT(*)::int FROM inventory_batches
+                WHERE tenant_id = ? AND quantity_on_hand > 0
+                  AND expiry_date IS NOT NULL AND expiry_date <= CURRENT_DATE + INTERVAL '30 days'
+                """, Integer.class, tenantId);
+        if (expiring != null && expiring > 0) actions.add(new DashboardAction("expiry", "Check expiring stock", expiring + " active batch" + (expiring == 1 ? " expires" : "es expire") + " within 30 days", "warning", "inventory"));
+
+        CreditSummary credit = creditSummary(tenantId);
+        if (credit.customers() > 0) actions.add(new DashboardAction("credit", "Follow up customer credit", credit.customers() + " customer" + (credit.customers() == 1 ? " has" : "s have") + " an outstanding balance", "danger", "bills"));
+        return actions;
+    }
+
     private static long toWholeUnits(BigDecimal qty) {
         if (qty == null) return 0L;
         return qty.setScale(0, java.math.RoundingMode.HALF_UP).longValue();

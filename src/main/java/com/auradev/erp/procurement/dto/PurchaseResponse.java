@@ -21,8 +21,11 @@ public record PurchaseResponse(
         BigDecimal subtotal,
         BigDecimal gstTotal,
         BigDecimal grandTotal,
+        BigDecimal totalPaid,
+        BigDecimal balanceDue,
         String notes,
         Instant createdAt,
         Instant updatedAt,
+        List<PurchasePaymentResponse> payments,
         List<PurchaseLineResponse> lines
 ) {}

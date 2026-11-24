@@ -132,10 +132,28 @@ public class SettingsService {
 
         int widthMm = req.widthMm() != null ? req.widthMm() : current.widthMm();
         boolean autoPrint = req.autoPrint() != null ? req.autoPrint() : current.autoPrint();
+        boolean autoDownloadReceipt = req.autoDownloadReceipt() != null ? req.autoDownloadReceipt() : current.autoDownloadReceipt();
         int copies = req.copies() != null ? req.copies() : current.copies();
         boolean showLogo = req.showLogo() != null ? req.showLogo() : current.showLogo();
 
-        PrinterConfig updated = new PrinterConfig(widthMm, autoPrint, copies, showLogo).normalized();
+        PrinterConfig updated = new PrinterConfig(widthMm, autoPrint, autoDownloadReceipt, copies, showLogo,
+                valueOr(req.showStorePhone(), current.showStorePhone()),
+                valueOr(req.showStoreAddress(), current.showStoreAddress()),
+                valueOr(req.showStoreTin(), current.showStoreTin()),
+                valueOr(req.showBillDate(), current.showBillDate()),
+                valueOr(req.showCustomer(), current.showCustomer()),
+                valueOr(req.showCashier(), current.showCashier()),
+                valueOr(req.showPayment(), current.showPayment()),
+                valueOr(req.showTendered(), current.showTendered()),
+                valueOr(req.showChange(), current.showChange()),
+                valueOr(req.showTaxBreakup(), current.showTaxBreakup()),
+                req.receiptTitle() != null ? req.receiptTitle() : current.receiptTitle(),
+                valueOr(req.cashDrawerEnabled(), current.cashDrawerEnabled()),
+                req.cashDrawerConnection() != null ? req.cashDrawerConnection() : current.cashDrawerConnection(),
+                req.cashDrawerName() != null ? req.cashDrawerName() : current.cashDrawerName(),
+                req.cashDrawerPort() != null ? req.cashDrawerPort() : current.cashDrawerPort(),
+                valueOr(req.openDrawerOnCashPayment(), current.openDrawerOnCashPayment()),
+                valueOr(req.allowManualDrawerOpen(), current.allowManualDrawerOpen())).normalized();
         settings.setPrinter(updated);
         settings.setUpdatedBy(currentUserId());
         tenantSettingsRepository.save(settings);
@@ -143,8 +161,13 @@ public class SettingsService {
         auditService.log("PRINTER_SETTINGS_UPDATED", "tenant_settings", settings.getTenantId(), Map.of(
                 "widthMm", updated.widthMm(),
                 "autoPrint", updated.autoPrint(),
+                "autoDownloadReceipt", updated.autoDownloadReceipt(),
                 "copies", updated.copies(),
-                "showLogo", updated.showLogo()));
+                "showLogo", updated.showLogo(),
+                "receiptTitle", updated.receiptTitle(),
+                "cashDrawerEnabled", updated.cashDrawerEnabled(),
+                "cashDrawerConnection", updated.cashDrawerConnection(),
+                "cashDrawerPort", updated.cashDrawerPort()));
         return toPrinterResponse(updated);
     }
 
@@ -187,7 +210,9 @@ public class SettingsService {
                 req.showCashierOnReceipt() != null ? req.showCashierOnReceipt() : current.showCashierOnReceipt(),
                 req.showGstBreakupOnReceipt() != null ? req.showGstBreakupOnReceipt() : current.showGstBreakupOnReceipt(),
                 req.showCustomerOnReceipt() != null ? req.showCustomerOnReceipt() : current.showCustomerOnReceipt(),
-                req.roundTotalToRupee() != null ? req.roundTotalToRupee() : current.roundTotalToRupee()
+                req.roundTotalToRupee() != null ? req.roundTotalToRupee() : current.roundTotalToRupee(),
+                req.markOverdueShiftsAtClose() != null ? req.markOverdueShiftsAtClose() : current.markOverdueShiftsAtClose(),
+                req.shiftClosingTime() != null ? req.shiftClosingTime() : current.shiftClosingTime()
         ).normalized();
 
         settings.setBilling(updated);
@@ -281,7 +306,11 @@ public class SettingsService {
 
     private static PrinterSettingsResponse toPrinterResponse(PrinterConfig config) {
         PrinterConfig c = config.normalized();
-        return new PrinterSettingsResponse(c.widthMm(), c.autoPrint(), c.copies(), c.showLogo());
+        return new PrinterSettingsResponse(c.widthMm(), c.autoPrint(), c.autoDownloadReceipt(), c.copies(), c.showLogo(),
+                c.showStorePhone(), c.showStoreAddress(), c.showStoreTin(), c.showBillDate(),
+                c.showCustomer(), c.showCashier(), c.showPayment(), c.showTendered(), c.showChange(),
+                c.showTaxBreakup(), c.receiptTitle(), c.cashDrawerEnabled(), c.cashDrawerConnection(),
+                c.cashDrawerName(), c.cashDrawerPort(), c.openDrawerOnCashPayment(), c.allowManualDrawerOpen());
     }
 
     private static BillingSettingsResponse toBillingResponse(BillingConfig config) {
@@ -296,7 +325,9 @@ public class SettingsService {
                 c.showCashierOnReceipt(),
                 c.showGstBreakupOnReceipt(),
                 c.showCustomerOnReceipt(),
-                c.roundTotalToRupee());
+                c.roundTotalToRupee(),
+                c.markOverdueShiftsAtClose(),
+                c.shiftClosingTime());
     }
 
     private TaxSettingsResponse toTaxResponse(TaxConfig config) {
@@ -350,6 +381,10 @@ public class SettingsService {
     private static String blankToNull(String v) {
         if (v == null || v.isBlank()) return null;
         return v.trim();
+    }
+
+    private static boolean valueOr(Boolean value, boolean fallback) {
+        return value != null ? value : fallback;
     }
 
     private static String extensionFor(String contentType) {

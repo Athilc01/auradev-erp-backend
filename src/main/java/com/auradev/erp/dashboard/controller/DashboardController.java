@@ -5,6 +5,7 @@ import com.auradev.erp.dashboard.dto.DashboardMetricsResponse;
 import com.auradev.erp.dashboard.dto.DashboardResponse;
 import com.auradev.erp.dashboard.dto.DashboardShellResponse;
 import com.auradev.erp.dashboard.dto.DashboardTrendResponse;
+import com.auradev.erp.dashboard.dto.DailyBusinessReportResponse;
 import com.auradev.erp.dashboard.service.DashboardService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -89,6 +90,14 @@ public class DashboardController {
             @RequestParam(required = false) UUID productId) {
         return ResponseEntity.ok(dashboardService.getSalesTrend(
                 effectivePreset(preset, range), from, to, customerId, productId));
+    }
+
+    @Operation(summary = "Daily business report", description = "Manager-facing sales, collection, stock and shift summary for one business date")
+    @GetMapping("/daily-report")
+    @PreAuthorize("@authz.can(authentication, 'DASHBOARD_VIEW')")
+    public ResponseEntity<DailyBusinessReportResponse> dailyReport(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        return ResponseEntity.ok(dashboardService.dailyBusinessReport(date));
     }
 
     private static String effectivePreset(String preset, String range) {

@@ -8,5 +8,6 @@ public record CreateCustomerRequest(
         @NotBlank @Size(max = 200) String name,
         @Size(max = 20) String phone,
         CustomerType type,
-        @Size(max = 15) String gstin
+        @Size(max = 15) String gstin,
+        @Size(max = 500) String address
 ) {}

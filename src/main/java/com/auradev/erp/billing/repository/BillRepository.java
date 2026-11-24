@@ -15,6 +15,7 @@ import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.Lock;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -45,7 +46,7 @@ public interface BillRepository extends JpaRepository<Bill, UUID> {
             SELECT new com.auradev.erp.billing.dto.BillSummaryResponse(
                 b.id,
                 b.billNo,
-                (SELECT c.name FROM Customer c WHERE c.id = b.customerId),
+                b.customerNameSnapshot,
                 (SELECT u.name FROM User u WHERE u.id = b.cashierId),
                 SIZE(b.items),
                 b.grandTotal,
@@ -54,13 +55,19 @@ public interface BillRepository extends JpaRepository<Bill, UUID> {
             FROM Bill b
             WHERE b.tenantId = :tenantId
               AND b.status = :status
+              AND (:customerId IS NULL OR b.customerId = :customerId)
               AND (:q IS NULL OR :q = '' OR lower(b.billNo) LIKE lower(concat('%', :q, '%')))
+              AND (:from IS NULL OR b.createdAt >= :from)
+              AND (:to IS NULL OR b.createdAt < :to)
             ORDER BY b.createdAt DESC
             """)
     Page<BillSummaryResponse> searchCompletedSummaries(
             @Param("tenantId") UUID tenantId,
             @Param("status") BillStatus status,
+            @Param("customerId") UUID customerId,
             @Param("q") String q,
+            @Param("from") Instant from,
+            @Param("to") Instant to,
             Pageable pageable);
 
     @Query("""

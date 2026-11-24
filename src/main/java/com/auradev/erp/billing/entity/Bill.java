@@ -26,6 +26,14 @@ public class Bill extends BaseEntity {
     @Column(name = "customer_id", nullable = false)
     private UUID customerId;
 
+    /** Customer identity as it was when this bill was saved; never read live for reprints. */
+    @Column(name = "customer_name_snapshot", nullable = false)
+    private String customerNameSnapshot;
+
+    /** Optional delivery address as it was when this bill was saved. */
+    @Column(name = "customer_address_snapshot")
+    private String customerAddressSnapshot;
+
     @Column(name = "cashier_id", nullable = false)
     private UUID cashierId;
 

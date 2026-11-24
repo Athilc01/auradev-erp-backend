@@ -25,6 +25,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.time.Instant;
 import java.util.stream.Collectors;
 
 @Service
@@ -49,10 +50,17 @@ public class AuditService {
 
     @Transactional(readOnly = true)
     public List<AuditLogResponse> listRecent(int limit) {
+        return list(limit, null, null);
+    }
+
+    @Transactional(readOnly = true)
+    public List<AuditLogResponse> list(int limit, Instant from, Instant to) {
         UUID tenantId = TenantContext.require();
-        int size = Math.min(Math.max(limit, 1), 100);
-        Page<AuditLog> page = auditLogRepository.findByTenantIdOrderByCreatedAtDesc(
-                tenantId, PageRequest.of(0, size));
+        int size = Math.min(Math.max(limit, 1), 500);
+        Page<AuditLog> page = from != null && to != null
+                ? auditLogRepository.findByTenantIdAndCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtDesc(
+                    tenantId, from, to, PageRequest.of(0, size))
+                : auditLogRepository.findByTenantIdOrderByCreatedAtDesc(tenantId, PageRequest.of(0, size));
 
         Set<UUID> userIds = page.getContent().stream()
                 .map(AuditLog::getUserId)

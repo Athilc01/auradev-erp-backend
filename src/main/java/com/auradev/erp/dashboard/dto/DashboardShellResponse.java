@@ -8,5 +8,6 @@ public record DashboardShellResponse(
         String userName,
         int lowStockCount,
         List<LowStockRow> lowStock,
-        List<ActivityRow> activity
+        List<ActivityRow> activity,
+        DashboardOperations operations
 ) {}

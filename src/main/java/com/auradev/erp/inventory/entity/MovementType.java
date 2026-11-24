@@ -10,6 +10,7 @@ import com.fasterxml.jackson.annotation.JsonValue;
 public enum MovementType {
     sale,
     purchase,
+    purchase_return,
     adjustment_in,
     adjustment_out,
     opening_stock,

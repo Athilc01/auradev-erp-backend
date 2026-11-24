@@ -12,5 +12,6 @@ public record DashboardResponse(
         List<RecentBillRow> recentBills,
         List<LowStockRow> lowStock,
         List<ActivityRow> activity,
+        DashboardOperations operations,
         String aiBrief
 ) {}

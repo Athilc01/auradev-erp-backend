@@ -16,10 +16,12 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.UUID;
+import java.time.LocalDate;
 import java.nio.charset.StandardCharsets;
 import java.io.StringWriter;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVPrinter;
+import org.springframework.format.annotation.DateTimeFormat;
 
 @RestController
 @RequestMapping("/api/v1/bills")
@@ -73,8 +75,11 @@ public class BillController {
     @PreAuthorize("@authz.can(authentication, 'BILL_VIEW')")
     public ResponseEntity<PageResponse<BillSummaryResponse>> list(
             @RequestParam(required = false) String q,
+            @RequestParam(required = false) UUID customerId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dateFrom,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dateTo,
             @PageableDefault(size = 25) Pageable pageable) {
-        return ResponseEntity.ok(billingService.listCompletedBills(q, pageable));
+        return ResponseEntity.ok(billingService.listCompletedBills(q, customerId, dateFrom, dateTo, pageable));
     }
 
     @GetMapping("/export/csv")

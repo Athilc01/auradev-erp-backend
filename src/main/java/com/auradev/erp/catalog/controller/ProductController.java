@@ -6,10 +6,13 @@ import com.auradev.erp.catalog.dto.UpdateProductRequest;
 import com.auradev.erp.catalog.service.CatalogService;
 import com.auradev.erp.common.pagination.PageResponse;
 import com.auradev.erp.inventory.dto.ProductStockAdjustBody;
+import com.auradev.erp.inventory.dto.OpeningStockLineRequest;
 import com.auradev.erp.inventory.dto.StockMovementResponse;
 import com.auradev.erp.inventory.dto.BatchReceiptRequest;
 import com.auradev.erp.inventory.dto.InventoryBatchResponse;
+import com.auradev.erp.inventory.dto.InventoryHealthResponse;
 import com.auradev.erp.inventory.service.InventoryService;
+import com.auradev.erp.inventory.entity.MovementType;
 import com.auradev.erp.tenant.TenantContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -38,7 +41,7 @@ public class ProductController {
     private final InventoryService inventoryService;
 
     @GetMapping
-    @PreAuthorize("@authz.can(authentication, 'INVENTORY_VIEW')")
+    @PreAuthorize("@authz.canAny(authentication, 'INVENTORY_VIEW', 'BILL_CREATE')")
     public ResponseEntity<PageResponse<ProductResponse>> list(
             @RequestParam(required = false) String q,
             @RequestParam(required = false) String category,
@@ -48,6 +51,10 @@ public class ProductController {
         return ResponseEntity.ok(catalogService.listProducts(
                 TenantContext.require(), q, category, unit, status, pageable));
     }
+
+    @GetMapping("/inventory-health")
+    @PreAuthorize("@authz.can(authentication, 'INVENTORY_VIEW')")
+    public ResponseEntity<InventoryHealthResponse> inventoryHealth() { return ResponseEntity.ok(inventoryService.health()); }
 
     @GetMapping("/export/csv")
     @PreAuthorize("@authz.can(authentication, 'INVENTORY_EXPORT')")
@@ -79,7 +86,7 @@ public class ProductController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("@authz.can(authentication, 'INVENTORY_VIEW')")
+    @PreAuthorize("@authz.canAny(authentication, 'INVENTORY_VIEW', 'BILL_CREATE')")
     public ResponseEntity<ProductResponse> get(@PathVariable UUID id) {
         return ResponseEntity.ok(catalogService.getProduct(id));
     }
@@ -136,5 +143,27 @@ public class ProductController {
             @Valid @RequestBody ProductStockAdjustBody req) {
         catalogService.adjustStock(id, req.movementType(), req.quantity(), req.notes());
         return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/opening-stock")
+    @PreAuthorize("@authz.can(authentication, 'INVENTORY_EDIT')")
+    public ResponseEntity<Void> openingStock(@Valid @RequestBody List<@Valid OpeningStockLineRequest> lines) {
+        inventoryService.recordOpeningStock(lines);
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/opening-stock")
+    @PreAuthorize("@authz.can(authentication, 'INVENTORY_VIEW')")
+    public ResponseEntity<PageResponse<StockMovementResponse>> openingStock(
+            @PageableDefault(size = 200, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
+        return ResponseEntity.ok(inventoryService.getOpeningStock(pageable));
+    }
+
+    @GetMapping("/stock-transactions")
+    @PreAuthorize("@authz.can(authentication, 'INVENTORY_VIEW')")
+    public ResponseEntity<PageResponse<StockMovementResponse>> stockTransactions(
+            @RequestParam List<MovementType> types,
+            @PageableDefault(size = 200, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
+        return ResponseEntity.ok(inventoryService.getTransactions(types, pageable));
     }
 }

@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.util.UUID;
 
 public record PurchaseLineResponse(
+        UUID purchaseItemId,
         UUID productId,
         String name,
         String sku,
@@ -13,5 +14,7 @@ public record PurchaseLineResponse(
         BigDecimal gstRate,
         BigDecimal amount,
         BigDecimal gstAmount,
-        BigDecimal lineTotal
+        BigDecimal lineTotal,
+        BigDecimal receivedQuantity,
+        boolean expiryTracked
 ) {}

@@ -13,6 +13,9 @@ import com.auradev.erp.settings.service.RoleModuleAccessService;
 import com.auradev.erp.settings.dto.RoleModuleAccessResponse;
 import com.auradev.erp.settings.dto.UpdateRoleModuleAccessRequest;
 import com.auradev.erp.auth.security.UserPrincipal;
+import com.auradev.erp.backup.dto.DatabaseBackupResponse;
+import com.auradev.erp.backup.dto.DatabaseBackupStatusResponse;
+import com.auradev.erp.backup.service.DatabaseBackupService;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -32,6 +35,7 @@ public class SettingsController {
 
     private final SettingsService settingsService;
     private final RoleModuleAccessService roleModuleAccessService;
+    private final DatabaseBackupService databaseBackupService;
 
     @GetMapping("/module-access/me")
     @PreAuthorize("isAuthenticated()")
@@ -117,6 +121,20 @@ public class SettingsController {
     public ResponseEntity<PrinterSettingsResponse> updatePrinterSettings(
             @Valid @RequestBody UpdatePrinterSettingsRequest req) {
         return ResponseEntity.ok(settingsService.updatePrinterSettings(req));
+    }
+
+    @GetMapping("/backups")
+    @PreAuthorize("@authz.can(authentication, 'SETTINGS_STORE_EDIT')")
+    @Operation(summary = "Get local database backup status and history")
+    public ResponseEntity<DatabaseBackupStatusResponse> getDatabaseBackups() {
+        return ResponseEntity.ok(databaseBackupService.status());
+    }
+
+    @PostMapping("/backups/run")
+    @PreAuthorize("@authz.can(authentication, 'SETTINGS_STORE_EDIT')")
+    @Operation(summary = "Queue a manual local database backup")
+    public ResponseEntity<DatabaseBackupResponse> runDatabaseBackup(@AuthenticationPrincipal UserPrincipal principal) {
+        return ResponseEntity.accepted().body(databaseBackupService.requestManualBackup(principal));
     }
 }
 

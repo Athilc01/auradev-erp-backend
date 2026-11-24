@@ -27,6 +27,7 @@ import com.auradev.erp.settings.model.TaxConfig;
 import com.auradev.erp.settings.model.CategoryGstRate;
 import com.auradev.erp.settings.service.SettingsService;
 import com.auradev.erp.tenant.TenantContext;
+import com.auradev.erp.shift.service.CashierShiftService;
 import com.auradev.erp.tenant.entity.Tenant;
 import com.auradev.erp.tenant.repository.TenantRepository;
 import com.auradev.erp.user.entity.User;
@@ -46,6 +47,7 @@ import java.io.StringWriter;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -62,6 +64,7 @@ import java.util.stream.Collectors;
 @Transactional
 @RequiredArgsConstructor
 public class BillingService {
+    private final CashierShiftService cashierShiftService;
 
     private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
 
@@ -107,6 +110,7 @@ public class BillingService {
         customer.setPhone(phone);
         customer.setType(type);
         customer.setGstin(blankToNull(req.gstin()));
+        customer.setAddress(blankToNull(req.address()));
         customer.setCreatedBy(principal.getId());
         customer.setUpdatedBy(principal.getId());
 
@@ -212,6 +216,7 @@ public class BillingService {
     }
 
     public BillResponse createBill(CreateBillRequest req) {
+        cashierShiftService.requireOpenShift();
         UUID tenantId = TenantContext.require();
         UserPrincipal principal = requirePrincipal();
         UUID cashierId = principal.getId();
@@ -253,6 +258,7 @@ public class BillingService {
     }
 
     public BillResponse holdBill(HoldBillRequest req) {
+        cashierShiftService.requireOpenShift();
         UUID tenantId = TenantContext.require();
         UserPrincipal principal = requirePrincipal();
         BillingConfig billing = settingsService.getBillingConfig();
@@ -270,7 +276,7 @@ public class BillingService {
         List<ComputedLine> lines = computeLines(req.items(), tax);
         Totals totals = computeTotals(lines, req.discountMode(), req.billDiscount(), tax);
 
-        Bill existing = resolveHeldBillForHold(tenantId, customer.getId(), req.heldBillId());
+        Bill existing = resolveHeldBillForHold(tenantId, req.heldBillId());
         if (existing != null) {
             assertStockForSale(tenantId, lines, existing.getId());
             applyHeldBillContents(existing, customer, cashierId, lines, totals, req.discountMode(), tax.scheme());
@@ -309,10 +315,15 @@ public class BillingService {
     }
 
     @Transactional(readOnly = true)
-    public PageResponse<BillSummaryResponse> listCompletedBills(String q, Pageable pageable) {
+    public PageResponse<BillSummaryResponse> listCompletedBills(String q, UUID customerId, LocalDate dateFrom, LocalDate dateTo, Pageable pageable) {
+        if (dateFrom != null && dateTo != null && dateTo.isBefore(dateFrom)) {
+            throw new BusinessException("INVALID_DATE_RANGE", "End date cannot be before start date");
+        }
         UUID tenantId = TenantContext.require();
+        Instant from = dateFrom == null ? null : dateFrom.atStartOfDay(ZoneId.of("Asia/Qatar")).toInstant();
+        Instant to = dateTo == null ? null : dateTo.plusDays(1).atStartOfDay(ZoneId.of("Asia/Qatar")).toInstant();
         var page = billRepository.searchCompletedSummaries(
-                tenantId, BillStatus.COMPLETED, blankToNull(q), pageable);
+                tenantId, BillStatus.COMPLETED, customerId, blankToNull(q), from, to, pageable);
         return PageResponse.of(page);
     }
 
@@ -341,7 +352,9 @@ public class BillingService {
                         CSVFormat.DEFAULT.builder().setHeader(headers).build())) {
                     for (Bill bill : bills) {
                         bill.getPayments().size();
-                        String customer = customerNames.getOrDefault(bill.getCustomerId(), "");
+                        String customer = bill.getCustomerNameSnapshot() != null
+                                ? bill.getCustomerNameSnapshot()
+                                : customerNames.getOrDefault(bill.getCustomerId(), "");
                         String cashier = cashierNames.getOrDefault(bill.getCashierId(), "");
                         String paymentMethod = primaryPaymentMethod(bill);
                         for (BillItem item : bill.getItems()) {
@@ -379,7 +392,9 @@ public class BillingService {
                         printer.printRecord(
                                 bill.getBillNo(),
                                 bill.getCreatedAt(),
-                                customerNames.getOrDefault(bill.getCustomerId(), ""),
+                                bill.getCustomerNameSnapshot() != null
+                                        ? bill.getCustomerNameSnapshot()
+                                        : customerNames.getOrDefault(bill.getCustomerId(), ""),
                                 cashierNames.getOrDefault(bill.getCashierId(), ""),
                                 bill.getItems().size(),
                                 bill.getSubtotal(),
@@ -443,6 +458,7 @@ public class BillingService {
     }
 
     public BillResponse completeHeldBill(UUID id, CompleteHeldBillRequest req) {
+        cashierShiftService.requireOpenShift();
         UUID tenantId = TenantContext.require();
         UserPrincipal principal = requirePrincipal();
         UUID cashierId = principal.getId();
@@ -463,6 +479,8 @@ public class BillingService {
 
         bill.getItems().clear();
         bill.setCustomerId(customer.getId());
+        bill.setCustomerNameSnapshot(customer.getName());
+        bill.setCustomerAddressSnapshot(customer.getAddress());
         bill.setBillNo(billNo);
         bill.setSubtotal(totals.subtotal());
         bill.setBillDiscount(totals.discount());
@@ -524,6 +542,8 @@ public class BillingService {
         bill.setTenantId(tenantId);
         bill.setBillNo(billNo);
         bill.setCustomerId(customer.getId());
+        bill.setCustomerNameSnapshot(customer.getName());
+        bill.setCustomerAddressSnapshot(customer.getAddress());
         bill.setCashierId(cashierId);
         bill.setPlaceOfSupplyState(tenant.getStateCode());
         bill.setSubtotal(totals.subtotal());
@@ -614,23 +634,12 @@ public class BillingService {
         }
     }
 
-    private Bill resolveHeldBillForHold(UUID tenantId, UUID customerId, UUID heldBillId) {
+    private Bill resolveHeldBillForHold(UUID tenantId, UUID heldBillId) {
         if (heldBillId != null) {
-            Bill bill = billRepository.findByIdAndTenantIdAndStatus(heldBillId, tenantId, BillStatus.HELD)
+            return billRepository.findByIdAndTenantIdAndStatus(heldBillId, tenantId, BillStatus.HELD)
                     .orElseThrow(() -> new EntityNotFoundException("HeldBill", heldBillId));
-            if (!bill.getCustomerId().equals(customerId)) {
-                billRepository.findByTenantIdAndCustomerIdAndStatus(tenantId, customerId, BillStatus.HELD)
-                        .filter(other -> !other.getId().equals(bill.getId()))
-                        .ifPresent(other -> {
-                            throw new BusinessException(
-                                    "CUSTOMER_HAS_PARKED_BILL",
-                                    "This customer already has a parked bill — resume it first");
-                        });
-            }
-            return bill;
         }
-        return billRepository.findByTenantIdAndCustomerIdAndStatus(tenantId, customerId, BillStatus.HELD)
-                .orElse(null);
+        return null;
     }
 
     private void applyHeldBillContents(
@@ -643,6 +652,8 @@ public class BillingService {
             GstScheme gstScheme) {
         bill.getItems().clear();
         bill.setCustomerId(customer.getId());
+        bill.setCustomerNameSnapshot(customer.getName());
+        bill.setCustomerAddressSnapshot(customer.getAddress());
         bill.setSubtotal(totals.subtotal());
         bill.setBillDiscount(totals.discount());
         bill.setDiscountMode(discountMode);
@@ -979,12 +990,14 @@ public class BillingService {
                 .toList();
 
         Payment primary = bill.getPayments().isEmpty() ? null : bill.getPayments().get(0);
+        List<BillPaymentResponse> payments = bill.getPayments().stream()
+                .map(p -> new BillPaymentResponse(p.getMethod(), p.getAmount(), p.getTendered(), p.getChangeDue()))
+                .toList();
         PaymentMethod method = null;
-        if (payment != null) {
-            boolean isSplit = payment.splitCashAmount() != null
-                    && payment.splitCashAmount().compareTo(BigDecimal.ZERO) > 0
-                    && bill.getPayments().size() > 1;
-            method = isSplit ? PaymentMethod.CASH : payment.method();
+        if (payments.size() > 1) {
+            method = PaymentMethod.SPLIT_COMPONENT;
+        } else if (payment != null) {
+            method = payment.method();
         } else if (primary != null) {
             method = primary.getMethod();
         }
@@ -993,7 +1006,8 @@ public class BillingService {
                 bill.getId(),
                 bill.getBillNo(),
                 customer.getId(),
-                customer.getName(),
+                bill.getCustomerNameSnapshot() != null ? bill.getCustomerNameSnapshot() : customer.getName(),
+                bill.getCustomerAddressSnapshot(),
                 cashierName,
                 status,
                 discountMode,
@@ -1009,6 +1023,7 @@ public class BillingService {
                 primary != null ? primary.getChangeDue() : null,
                 bill.getCreatedAt(),
                 bill.getUpdatedAt(),
+                payments,
                 computeGstSlabs(bill),
                 lines);
     }
@@ -1045,7 +1060,7 @@ public class BillingService {
 
     private CustomerResponse toCustomerResponse(Customer c) {
         return new CustomerResponse(
-                c.getId(), c.getName(), c.getPhone(), c.getType(),
+                c.getId(), c.getName(), c.getPhone(), c.getAddress(), c.getType(),
                 c.getLoyaltyPoints(), c.getCreditBalance());
     }
 

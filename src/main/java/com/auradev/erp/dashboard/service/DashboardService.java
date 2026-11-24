@@ -17,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.UUID;
 
@@ -40,7 +41,8 @@ public class DashboardService {
                 currentUserName(),
                 queries.countLowStock(tenantId),
                 queries.lowStockProducts(tenantId, 6),
-                queries.recentActivity(tenantId, 8));
+                queries.recentActivity(tenantId, 8),
+                buildOperations(tenantId));
     }
 
     public DashboardMetricsResponse getMetrics(
@@ -89,6 +91,7 @@ public class DashboardService {
                 queries.recentBillsInScope(tenantId, scope, 10),
                 queries.lowStockProducts(tenantId, 6),
                 queries.recentActivity(tenantId, 8),
+                buildOperations(tenantId),
                 buildAiBrief(kpis, meta));
     }
 
@@ -128,6 +131,11 @@ public class DashboardService {
         return new DashboardTrendResponse(queries.salesTrend(tenantId, scope));
     }
 
+    @Transactional(readOnly = true)
+    public DailyBusinessReportResponse dailyBusinessReport(LocalDate date) {
+        return queries.dailyBusinessReport(TenantContext.require(), date == null ? LocalDate.now(ZoneId.of("Asia/Qatar")) : date);
+    }
+
     private DashboardMeta buildMeta(DashboardScope scope) {
         String customerName = scope.customerId() != null
                 ? customerRepository.findById(scope.customerId()).map(c -> c.getName()).orElse("Customer")
@@ -157,6 +165,27 @@ public class DashboardService {
                     .orElse(principal.getEmail());
         }
         return "there";
+    }
+
+    private DashboardOperations buildOperations(UUID tenantId) {
+        boolean financial = canViewFinancialOperations();
+        List<DashboardAction> actions = queries.operationalActions(tenantId);
+        if (!financial) {
+            actions = actions.stream().filter(action -> !"credit".equals(action.type())).toList();
+        }
+        return new DashboardOperations(
+                financial ? queries.todayCashSummary(tenantId) : null,
+                financial ? queries.creditSummary(tenantId) : null,
+                actions);
+    }
+
+    private boolean canViewFinancialOperations() {
+        var auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !(auth.getPrincipal() instanceof UserPrincipal principal)) return false;
+        return switch (principal.getRole()) {
+            case SUPER_ADMIN, TENANT_ADMIN, MANAGER, ACCOUNTANT -> true;
+            default -> false;
+        };
     }
 
     private String buildAiBrief(DashboardKpis kpis, DashboardMeta meta) {

@@ -106,8 +106,9 @@ public class AuthService {
 
         persistRefreshToken(user, refreshToken);
 
-        user.setLastLoginAt(Instant.now());
-        userRepository.save(user);
+        // Do not save the complete User entity here. A concurrent profile or
+        // permission update would otherwise make a valid login fail with 409.
+        userRepository.updateLastLoginAt(user.getId(), Instant.now());
 
         auditService.logForUser(user, "LOGIN_SUCCESS", "user", user.getId(), null, clientIp);
 

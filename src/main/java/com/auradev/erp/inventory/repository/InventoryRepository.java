@@ -20,6 +20,7 @@ public interface InventoryRepository extends JpaRepository<Inventory, UUID> {
 
     Optional<Inventory> findByTenantIdAndProductId(UUID tenantId, UUID productId);
 
+    @org.springframework.data.jpa.repository.EntityGraph(attributePaths = "product")
     List<Inventory> findByTenantId(UUID tenantId);
 
     @Query("""

@@ -1,6 +1,9 @@
 package com.auradev.erp.user.repository;
 
 import com.auradev.erp.user.entity.User;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
@@ -41,4 +44,13 @@ public interface UserRepository extends JpaRepository<User, UUID> {
      * Return all users belonging to the given tenant.
      */
     List<User> findAllByTenantId(UUID tenantId);
+
+    /**
+     * Records a successful sign-in without loading and saving the whole user
+     * record. Login must remain reliable even when an admin updates the same
+     * user at the same time.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("update User u set u.lastLoginAt = :lastLoginAt where u.id = :userId")
+    int updateLastLoginAt(@Param("userId") UUID userId, @Param("lastLoginAt") java.time.Instant lastLoginAt);
 }

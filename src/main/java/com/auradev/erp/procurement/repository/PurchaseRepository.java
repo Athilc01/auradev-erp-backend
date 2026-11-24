@@ -16,13 +16,18 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.Optional;
+import java.util.Collection;
 import java.util.UUID;
+import java.math.BigDecimal;
 
 @Repository
 public interface PurchaseRepository extends JpaRepository<Purchase, UUID> {
 
     @EntityGraph(attributePaths = {"items", "items.product"})
     Optional<Purchase> findByIdAndTenantId(UUID id, UUID tenantId);
+
+    @EntityGraph(attributePaths = {"payments"})
+    java.util.List<Purchase> findByTenantIdAndSupplierIdAndStatusOrderByBillDateAsc(UUID tenantId, UUID supplierId, PurchaseStatus status);
 
     @Query("""
             SELECT new com.auradev.erp.procurement.dto.PurchaseSummaryResponse(
@@ -37,7 +42,7 @@ public interface PurchaseRepository extends JpaRepository<Purchase, UUID> {
                 p.createdAt)
             FROM Purchase p
             WHERE p.tenantId = :tenantId
-              AND p.status = COALESCE(:status, p.status)
+              AND p.status IN :statuses
               AND p.supplierId = COALESCE(:supplierId, p.supplierId)
               AND (:q IS NULL OR :q = '' OR lower(p.purchaseNo) LIKE lower(concat('%', :q, '%')))
             ORDER BY p.billDate DESC, p.createdAt DESC
@@ -45,9 +50,21 @@ public interface PurchaseRepository extends JpaRepository<Purchase, UUID> {
     Page<com.auradev.erp.procurement.dto.PurchaseSummaryResponse> searchSummaries(
             @Param("tenantId") UUID tenantId,
             @Param("q") String q,
-            @Param("status") PurchaseStatus status,
+            @Param("statuses") Collection<PurchaseStatus> statuses,
             @Param("supplierId") UUID supplierId,
             Pageable pageable);
+
+    long countByTenantId(UUID tenantId);
+
+    long countByTenantIdAndStatus(UUID tenantId, PurchaseStatus status);
+
+    @Query("SELECT SUM(p.grandTotal) FROM Purchase p WHERE p.tenantId = :tenantId")
+    BigDecimal sumGrandTotalByTenantId(@Param("tenantId") UUID tenantId);
+
+    @Query("SELECT SUM(p.grandTotal) FROM Purchase p WHERE p.tenantId = :tenantId AND p.status = :status")
+    BigDecimal sumGrandTotalByTenantIdAndStatus(
+            @Param("tenantId") UUID tenantId,
+            @Param("status") PurchaseStatus status);
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(value = """
